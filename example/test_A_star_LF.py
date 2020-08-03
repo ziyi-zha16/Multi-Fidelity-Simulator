@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import os,sys       #这几行（1~3）在安装了之后可以省略
+import os,sys       #这几行（2~4）在安装了之后可以省略
 parentdir = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) 
 sys.path.insert(0,parentdir) 
 
