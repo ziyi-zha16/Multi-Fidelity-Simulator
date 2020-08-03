@@ -7,11 +7,16 @@ from gym import spaces
 import copy
 
 from gym.utils import seeding
+
+import os,sys                   #这几行（11~13）在安装了之后可以省略
+parentdir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) 
+sys.path.insert(0,parentdir) 
+
 from MF_Sim.LF_Sim.core import *
 from MF_Sim.HF_Sim import random_map,simulator
 
 class Full_env(gym.Env):
-    def __init__(self, length=0, width=0,is_random=False, agent_number=1, agents=None, map=None, goal_list=[] ,res=1):
+    def __init__(self, length=0, width=0,is_random=False, agent_number=1, agents=None, o_map=None, goal_list=[] ,res=1):
         #地图长宽
         self.len = length
         self.wid = width
@@ -33,10 +38,12 @@ class Full_env(gym.Env):
         self.theta = [0, 0.5, 1, 1.5]       #用于取转向角度0至2pi     
 
         self.viewer = None
+        self.local_viewer=None
         self.agent_geom_list = None
+        self.local_agent_geom_list = None
         self.grid_geom_list = None          #渲染画面用的
+        self.local_grid_geom_list = None
 
-        #self.direct_space = 2
         self.cam_range = round(self.len/2)+5
         # self.rewcnt = 0
         # self.crashcnt = 0
@@ -51,16 +58,14 @@ class Full_env(gym.Env):
         #构造地图和智能体
         if is_random:                           #地图和智能体均随机
             self.random_fill(length, width)     #随机构建地图和agent的位置和目标
-        elif map is None:
-            self.map=np.zeros((self.len, self.wid))     #构建全0地图
-            self.o_map = copy.deepcopy(self.map)
+        elif o_map is None:
+            self.o_map=np.zeros((self.len, self.wid))     #构建全0地图
+            self.map = copy.deepcopy(self.o_map)
         else:
-            self.map = map
-            self.o_map = copy.deepcopy(self.map)            #该地图不包含agents信息，仅包含障碍物
-        for agent in self.agents:               #将agent的位置放入地图
-            agent.movable = True
-            agent.reach = False
-            agent.crash = False
+            self.o_map = o_map
+            self.map = copy.deepcopy(self.o_map)            #该地图不包含agents信息，仅包含障碍物
+        for agent in self.agents:               #将agent的位置放入地图，并定义好本地地图的大小
+            agent.set_localmap_size(3*self.len,3*self.wid)
             if agent.pos.x!=None and agent.pos.y!=None:
                 self.map[agent.pos.x][agent.pos.y] = 1
         
@@ -70,6 +75,7 @@ class Full_env(gym.Env):
         self.observation_space = []             #设置观测空间
         for agent in self.agents:
             self.observation_space.append(self.observation(agent))
+        self.observation_space=np.array(self.observation_space)
 
 
     def observation(self,agent):                    #得到当前的观测
@@ -94,19 +100,27 @@ class Full_env(gym.Env):
                 map_other_pos[other.pos.x][other.pos.y] = 1
         map.append(map_other_pos)
         #方向
-        direct1 = np.zeros((self.len,self.wid))
-        direct2 = np.zeros((self.len,self.wid))
-        direct1[:][:] = np.cos(np.pi*self.theta[agent.direct])
-        direct2[:][:] = np.sin(np.pi*self.theta[agent.direct])
-        map.append(direct1)
-        map.append(direct2)
-    
+        direct = np.zeros((self.len,self.wid))
+        direct[:][:] = agent.direct
+        #direct=agent.direct
+        map.append(direct)
+        #得到两个地图的坐标偏差
+        deviation_x= np.zeros((self.len,self.wid))
+        deviation_y= np.zeros((self.len,self.wid))
+        deviation_x[:][:]=agent.deviation_x
+        deviation_y[:][:]=agent.deviation_y
+        map.append(deviation_x)
+        map.append(deviation_y)
+
         return map
+
+    def get_o_map(self):       #得到障碍物地图
+        return self.o_map
 
     def get_state(self):#[[x,y,direct,vel],[]...]       #获取状态
         state_list = []
         for agent in self.agents:
-            state = [agent.pos.x, agent.pos.y, agent.direct, agent.vel]
+            state = [agent.pos.x, agent.pos.y, agent.goal.x, agent.goal.y,agent.direct, agent.vel]
             state_list.append(state)
         return state_list
 
@@ -143,7 +157,7 @@ class Full_env(gym.Env):
             vertices_y = fence['vertices_y']
             for x in range(int(round(vertices_x[0])), int(round(vertices_x[2]))):
                 for y in range(int(round(vertices_y[0])), int(round(vertices_y[2]))):
-                    self.map[x,y] = 1
+                    self.map[length-y-1,x] = 1
         
         self.o_map = copy.deepcopy(self.map)
         
@@ -156,10 +170,7 @@ class Full_env(gym.Env):
         #for agent in self.agents:
             agent = self.agents[i]
             agent_HFS = agent_list[i]
-            agent.act = 0
-            agent.movable = True
-            agent.reach = False
-            agent.crash = False
+            agent.reset() 
             #agent.vel = 1.47
             
             agent.direct = math.floor(agent_HFS['init_theta']*4/6.28)   #确定随机方向
@@ -167,20 +178,20 @@ class Full_env(gym.Env):
             assert agent.direct<4
             agent.direct_origin=agent.direct
 
-            agent.pos.x = int(round(agent_HFS['init_x']))
-            agent.pos.y = int(round(agent_HFS['init_y']))
+            agent.pos.x = length-int(round(agent_HFS['init_y']))-1
+            agent.pos.y = int(round(agent_HFS['init_x']))
             while self.map[agent.pos.x,agent.pos.y] == 1:
-                agent.pos.x = round(random.randint(1,self.len-2))
-                agent.pos.y = round(random.randint(1,self.wid-2))
+                agent.pos.x = round(random.randint(1,length-2))
+                agent.pos.y = round(random.randint(1,width-2))
             self.map[agent.pos.x][agent.pos.y] = 1
             agent.pos_origin_x=agent.pos.x          #记录原始信息
             agent.pos_origin_y=agent.pos.y
 
-            agent.goal.x = int(round(agent_HFS['init_target_x']))
-            agent.goal.y = int(round(agent_HFS['init_target_y']))
+            agent.goal.x = length-int(round(agent_HFS['init_target_y']))-1
+            agent.goal.y = int(round(agent_HFS['init_target_x']))
             while self.o_map[agent.goal.x,agent.goal.y] == 1:
-                agent.goal.x = round(random.randint(1,self.len-2))
-                agent.goal.y = round(random.randint(1,self.wid-2))
+                agent.goal.x = round(random.randint(1,length-2))
+                agent.goal.y = round(random.randint(1,width-2))
             goal_list.append(Coordinate(agent.goal.x,agent.goal.y))
             agent.goal_origin_x=agent.goal.x
             agent.goal_origin_y=agent.goal.y
@@ -225,9 +236,13 @@ class Full_env(gym.Env):
         reward = []
         done = []
         info = []
+        deviation_list=[]
         for (a, agent) in zip(action,self.agents):#action操作0-5,0不动，1右转，2前进，3左转，4后退
             agent.act = a
             #print(a)
+            deviation=agent.get_deviation()
+            # print(deviation)
+            # deviation_list.append(deviation)
             if agent.movable:
                 #直行
                 if agent.act == 2:
@@ -287,6 +302,7 @@ class Full_env(gym.Env):
                 agent.pos.x = x_new                         #更新当前坐标和方向以及agent的位置
                 agent.pos.y = y_new
                 agent.direct = direct_new
+                agent.localmap_update(self.map)      #根据agent的位置好更新localmap
 
                 self.map[agent.pos.x][agent.pos.y] = 1
                 self.bonus_map[agent.pos.x][agent.pos.y]+=1 #表示agent到达地图上的该位置的次数
@@ -315,12 +331,7 @@ class Full_env(gym.Env):
             #print('old map')
             self.map=copy.deepcopy(self.o_map)          #通过障碍物地图来还原地图
             for agent in self.agents:                   #非随机情况下，还原原始信息，重新进行训练
-                agent.set_start(agent.pos_origin_x,agent.pos_origin_y)  #还原agent的起始坐标和最终目标
-                agent.set_goal(agent.goal_origin_x,agent.goal_origin_y)
-                agent.act = 0
-                agent.movable = True
-                agent.reach = False
-                agent.direct = agent.direct_origin      #还原agent的起始方向
+                agent.reset()
                 self.crash = False
                 self.s_buffer = Coordinate()
                 if agent.pos.x!=None and agent.pos.y!=None:         #将agent的位置信息填入地图中
@@ -352,7 +363,7 @@ class Full_env(gym.Env):
         #rew+=rho*(1/self.bonus_map[agent.pos.x][agent.pos.y])
         if agent.crash:
             rew -= 5
-            agent.crash = 0
+            agent.crash = False
             #print("erase crash")
         if agent.reach:
             rew += 5
@@ -378,7 +389,7 @@ class Full_env(gym.Env):
         #print(rew)
         return 0.2*rew
                 
-    def render(self, mode = 'human'):
+    def render(self,num=None, mode = 'human'):
         if self.viewer is None:
             from MF_Sim.HF_Sim import rendering
             self.viewer = rendering.Viewer(800,800)         #设置窗口大小
@@ -410,8 +421,8 @@ class Full_env(gym.Env):
                 #geom.add_attr(total_xform)
                 #agent_geom['front_line']=(geom,xform)
                 self.agent_geom_list.append(agent_geom)
-            for x in range(self.wid):
-                for y in range(self.len):
+            for x in range(self.len):
+                for y in range(self.wid):
                     grid_geom={}
                     total_xform = rendering.Transform()
                     grid_geom['total_xform'] = total_xform
@@ -444,9 +455,73 @@ class Full_env(gym.Env):
             #agent_geom['target_circle'][1].set_translation(agent.state.target_x,agent.state.target_y)
             agent_geom['total_xform'].set_rotation(np.pi*self.theta[agent.direct])
             agent_geom['total_xform'].set_translation(agent.pos.x,agent.pos.y)
-            
-        return self.viewer.render(return_rgb_array = mode=='rgb_array')
-            
+        
+        self.viewer.render(return_rgb_array = mode=='rgb_array')
+        if num is not None:
+            if num>=0 and num<self.agent_number:
+                self.local_render(num)
+            else:
+                print('warming:agent index in render() is out of range,agent_number=',self.agent_number)
+                sys.exit()
+
+    def local_render(self, num,mode = 'human'):
+        if self.local_viewer is None:
+            from MF_Sim.HF_Sim import rendering
+            self.local_viewer = rendering.Viewer(800,800)         #设置窗口大小
+
+        if self.local_agent_geom_list is None:
+            # import rendering only if we need it (and don't import for headless machines)
+            from MF_Sim.HF_Sim import rendering
+            self.local_viewer.set_bounds(0, 0+3*self.len+20, 0, 0+3*self.wid+20)        #设置能看到的范围
+            self.local_agent_geom_list = []
+            self.local_grid_geom_list = []
+            agent=self.agents[num]
+            agent_geom = {}
+            total_xform = rendering.Transform()
+            agent_geom['total_xform'] = total_xform
+
+            half_l = agent.L_car/2.0
+            half_w = agent.W_car/2.0
+            geom = rendering.make_polygon([[half_l,half_w],[-half_l,half_w],[-half_l,-half_w],[half_l,-half_w]])
+            geom.set_color(*agent.color,alpha = 0.4)
+            xform = rendering.Transform()
+            geom.add_attr(xform)
+            geom.add_attr(total_xform)
+            agent_geom['car']=(geom,xform)
+
+            self.local_agent_geom_list.append(agent_geom)
+            for x in range(agent.localmap_L):
+                for y in range(agent.localmap_W):
+                    grid_geom={}
+                    total_xform = rendering.Transform()
+                    grid_geom['total_xform'] = total_xform
+
+                    geom = rendering.make_polygon([[x+0.5,y+0.5],[x-0.5, y+0.5], [x-0.5, y-0.5], [x+0.5, y-0.5]])
+                    if agent.localmap[x][y] == 1:
+                        geom.set_color(255,255,255, alpha = 0.4)
+                    elif agent.localmap[x][y] == 0:
+                        geom.set_color(0,255,0,alpha=0.5)
+                    elif agent.localmap[x][y] == -1:
+                        geom.set_color(0,0,0,alpha=0.5)
+                    xform = rendering.Transform()
+                    geom.add_attr(xform)
+                    grid_geom['grid']=(geom,xform)
+                    self.local_grid_geom_list.append(grid_geom)
+
+            self.local_viewer.geoms = []
+            for agent_geom in self.local_agent_geom_list:
+                self.local_viewer.add_geom(agent_geom['car'][0])
+            for grid_geom in self.local_grid_geom_list:
+                self.local_viewer.add_geom(grid_geom['grid'][0])
+
+        for agent_geom in self.local_agent_geom_list:
+            agent_geom['total_xform'].set_rotation(np.pi*self.theta[agent.direct])
+            agent_geom['total_xform'].set_translation(agent.localpos.x,agent.localpos.y)
+
+        self.local_agent_geom_list=None
+        self.local_grid_geom_list = None
+        self.local_viewer.render(return_rgb_array = mode=='rgb_array')
+
     def seed(self, seed=None):
         self.np_random, seed = seeding.np_random(seed)
         return [seed]
