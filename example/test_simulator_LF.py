@@ -1,6 +1,6 @@
-import os,sys       #这几行（1~3）在安装了之后可以省略
-parentdir = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) 
-sys.path.insert(0,parentdir) 
+# import os,sys       #这几行（1~3）在安装了之后可以省略
+# parentdir = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) 
+# sys.path.insert(0,parentdir) 
 
 from MF_Sim.LF_Sim import simulator
 

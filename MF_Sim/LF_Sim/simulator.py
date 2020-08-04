@@ -7,10 +7,10 @@ from gym import spaces
 import copy
 
 from gym.utils import seeding
-
-import os,sys                   #这几行（11~13）在安装了之后可以省略
-parentdir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) 
-sys.path.insert(0,parentdir) 
+import sys
+# import os                   #这几行（11~13）在安装了之后可以省略
+# parentdir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) 
+# sys.path.insert(0,parentdir) 
 
 from MF_Sim.LF_Sim.core import *
 from MF_Sim.HF_Sim import random_map,simulator
