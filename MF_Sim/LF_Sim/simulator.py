@@ -236,7 +236,7 @@ class Full_env(gym.Env):
         reward = []
         done = []
         info = []
-        deviation_list=[]
+        #deviation_list=[]
         for (a, agent) in zip(action,self.agents):#action操作0-5,0不动，1右转，2前进，3左转，4后退
             agent.act = a
             #print(a)
@@ -332,8 +332,6 @@ class Full_env(gym.Env):
             self.map=copy.deepcopy(self.o_map)          #通过障碍物地图来还原地图
             for agent in self.agents:                   #非随机情况下，还原原始信息，重新进行训练
                 agent.reset()
-                self.crash = False
-                self.s_buffer = Coordinate()
                 if agent.pos.x!=None and agent.pos.y!=None:         #将agent的位置信息填入地图中
                     self.map[agent.pos.x][agent.pos.y] = 1
         

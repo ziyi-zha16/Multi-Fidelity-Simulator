@@ -230,6 +230,7 @@ class Agent(object):
     def reset(self):
         self.set_start(self.pos_origin_x,self.pos_origin_y)  #还原agent的起始坐标和最终目标
         self.set_goal(self.goal_origin_x,self.goal_origin_y)
+        self.s_buffer = Coordinate()
         self.act = 0
         self.movable = True
         self.reach = False
